@@ -151,11 +151,14 @@ if uploaded_file and api_key:
         primary_variant_df = identify_primary_variants(cluster_data)
         combined_data = pd.merge(combined_data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
 
+        # Drop unnecessary columns and rename if needed
+        combined_data = combined_data.drop(columns=['Unnamed: 3'], errors='ignore')
+
         # Output results
         st.write("Analysis complete. Review the clusters below:")
         st.dataframe(combined_data)
 
         # Download link
-        st.download_button('Download Analysis Results', combined_data.to_csv().encode('utf-8'), 'analysis_results.csv', 'text/csv', key='download-csv')
+        st.download_button('Download Analysis Results', combined_data.to_csv(index=False).encode('utf-8'), 'analysis_results.csv', 'text/csv', key='download-csv')
     else:
         st.error("Failed to generate embeddings for all keywords.")
