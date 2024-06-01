@@ -126,25 +126,36 @@ if uploaded_file and api_key:
         clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=0.2, criterion='distance')
         data['Cluster ID'] = clusters
 
-        st.write("Identifying primary keywords within clusters...")
-        cluster_data = data[['Cluster ID', 'Keywords', 'Search Volume', 'CPC']]
-        
-        # Filter clusters to only include those with same CPC and Search Volume
+        # Check for same CPC and Search Volume within each cluster
+        st.write("Filtering clusters based on CPC and Search Volume...")
         valid_clusters = []
-        for cluster_id, group in cluster_data.groupby('Cluster ID'):
+        invalid_keywords = []
+        for cluster_id, group in data.groupby('Cluster ID'):
             if group['Search Volume'].nunique() == 1 and group['CPC'].nunique() == 1:
                 valid_clusters.append(cluster_id)
+            else:
+                invalid_keywords.extend(group['Keywords'].tolist())
         
-        filtered_data = cluster_data[cluster_data['Cluster ID'].isin(valid_clusters)]
+        filtered_data = data[data['Cluster ID'].isin(valid_clusters)]
         
-        primary_variant_df = identify_primary_variants(filtered_data)
-        data = pd.merge(data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
+        # Assign unique cluster IDs to invalid keywords
+        invalid_data = data[data['Keywords'].isin(invalid_keywords)].copy()
+        invalid_data['Cluster ID'] = range(filtered_data['Cluster ID'].max() + 1, 
+                                           filtered_data['Cluster ID'].max() + 1 + len(invalid_data))
+
+        # Combine valid and invalid data
+        combined_data = pd.concat([filtered_data, invalid_data], ignore_index=True)
+
+        st.write("Identifying primary keywords within clusters...")
+        cluster_data = combined_data[['Cluster ID', 'Keywords']]
+        primary_variant_df = identify_primary_variants(cluster_data)
+        combined_data = pd.merge(combined_data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
 
         # Output results
         st.write("Analysis complete. Review the clusters below:")
-        st.dataframe(data)
+        st.dataframe(combined_data)
 
         # Download link
-        st.download_button('Download Analysis Results', data.to_csv().encode('utf-8'), 'analysis_results.csv', 'text/csv', key='download-csv')
+        st.download_button('Download Analysis Results', combined_data.to_csv().encode('utf-8'), 'analysis_results.csv', 'text/csv', key='download-csv')
     else:
         st.error("Failed to generate embeddings for all keywords.")
