@@ -127,9 +127,18 @@ if uploaded_file and api_key:
         data['Cluster ID'] = clusters
 
         st.write("Identifying primary keywords within clusters...")
-        cluster_data = data[['Cluster ID', 'Keywords']]
-        primary_variant_df = identify_primary_variants(cluster_data)
-        data = pd.merge(data, primary_variant_df, on=['Cluster ID', 'Keywords'])
+        cluster_data = data[['Cluster ID', 'Keywords', 'Search Volume', 'CPC']]
+        
+        # Filter clusters to only include those with same CPC and Search Volume
+        valid_clusters = []
+        for cluster_id, group in cluster_data.groupby('Cluster ID'):
+            if group['Search Volume'].nunique() == 1 and group['CPC'].nunique() == 1:
+                valid_clusters.append(cluster_id)
+        
+        filtered_data = cluster_data[cluster_data['Cluster ID'].isin(valid_clusters)]
+        
+        primary_variant_df = identify_primary_variants(filtered_data)
+        data = pd.merge(data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
 
         # Output results
         st.write("Analysis complete. Review the clusters below:")
