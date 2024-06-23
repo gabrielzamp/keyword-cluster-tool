@@ -21,9 +21,7 @@ def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
                 return None
 
 # Function to analyze similarity distribution
-def plot_similarity_distribution(embeddings):
-    similarity_matrix = cosine_similarity(embeddings)
-    similarities = similarity_matrix[np.triu_indices_from(similarity_matrix, 1)]
+def plot_similarity_distribution(similarities):
     hist, bin_edges = np.histogram(similarities, bins=30)
     st.bar_chart(pd.DataFrame({'Frequency': hist, 'Cosine Similarity': bin_edges[:-1]}))
 
@@ -106,13 +104,15 @@ if uploaded_file and api_key:
     embeddings = [get_embedding(keyword) for keyword in keywords if get_embedding(keyword) is not None]
 
     if embeddings:
-        st.write("Plotting similarity distribution...")
-        plot_similarity_distribution(embeddings)
-
+        st.write("Calculating similarity matrix...")
         similarity_matrix = cosine_similarity(embeddings)
+        similarities = similarity_matrix[np.triu_indices_from(similarity_matrix, 1)]
+
+        st.write("Plotting similarity distribution...")
+        plot_similarity_distribution(similarities)
 
         # Allow user to set clustering threshold
-        threshold = st.slider('Set Clustering Threshold', min_value=0.1, max_value=2.0, value=1.5, step=0.1)
+        threshold = st.slider('Set Clustering Threshold', min_value=0.1, max_value=2.0, value=0.2, step=0.1)
 
         st.write(f"Using threshold: {threshold}")
         clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=threshold, criterion='distance')
