@@ -5,7 +5,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 from scipy.cluster.hierarchy import linkage, fcluster
 import openai
 import time
-import plotly.express as px
 
 # Function to generate embeddings
 def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
@@ -25,8 +24,8 @@ def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
 def plot_similarity_distribution(embeddings):
     similarity_matrix = cosine_similarity(embeddings)
     similarities = similarity_matrix[np.triu_indices_from(similarity_matrix, 1)]
-    fig = px.histogram(similarities, nbins=30, labels={'value': 'Cosine Similarity'}, title='Distribution of Pairwise Cosine Similarities')
-    st.plotly_chart(fig)
+    hist, bin_edges = np.histogram(similarities, bins=30)
+    st.bar_chart(pd.DataFrame({'Cosine Similarity': bin_edges[:-1], 'Frequency': hist}))
 
 # Streamlit page setup
 st.title('Keyword Research Cluster Analysis Tool')
