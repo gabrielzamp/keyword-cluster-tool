@@ -85,6 +85,7 @@ def identify_primary_variants(cluster_data):
     for cluster_id, group in cluster_data.groupby('Cluster ID'):
         keywords = group['Keywords'].tolist()
         best_keyword_reason = None  # Reset for each cluster
+        primary = None  # Initialize primary keyword
 
         if len(keywords) == 2:
             primary = choose_best_keyword(keywords[0], keywords[1])
@@ -124,7 +125,7 @@ if uploaded_file and api_key:
         st.write("Calculating similarity...")
         similarity_matrix = cosine_similarity(embeddings)
         st.write("Clustering keywords...")
-        clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=0.2, criterion='distance')
+        clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=1.5, criterion='distance')
         data['Cluster ID'] = clusters
 
         # Check for same CPC and Search Volume within each cluster
