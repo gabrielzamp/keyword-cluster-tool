@@ -25,7 +25,7 @@ def plot_similarity_distribution(embeddings):
     similarity_matrix = cosine_similarity(embeddings)
     similarities = similarity_matrix[np.triu_indices_from(similarity_matrix, 1)]
     hist, bin_edges = np.histogram(similarities, bins=30)
-    st.bar_chart(pd.DataFrame({'Cosine Similarity': bin_edges[:-1], 'Frequency': hist}))
+    st.bar_chart(pd.DataFrame({'Frequency': hist, 'Cosine Similarity': bin_edges[:-1]}))
 
 # Streamlit page setup
 st.title('Keyword Research Cluster Analysis Tool')
@@ -131,12 +131,14 @@ if uploaded_file and api_key:
         filtered_data = data[data['Cluster ID'].isin(valid_clusters)]
         
         # Assign unique cluster IDs to invalid keywords
-        invalid_data = data[data['Keywords'].isin(invalid_keywords)].copy()
-        invalid_data['Cluster ID'] = list(range(filtered_data['Cluster ID'].max() + 1, 
-                                                 filtered_data['Cluster ID'].max() + 1 + len(invalid_data)))
-
-        # Combine valid and invalid data
-        combined_data = pd.concat([filtered_data, invalid_data], ignore_index=True)
+        if len(invalid_keywords) > 0:
+            invalid_data = data[data['Keywords'].isin(invalid_keywords)].copy()
+            max_cluster_id = filtered_data['Cluster ID'].max() if not filtered_data.empty else 0
+            invalid_data['Cluster ID'] = range(max_cluster_id + 1, max_cluster_id + 1 + len(invalid_data))
+            # Combine valid and invalid data
+            combined_data = pd.concat([filtered_data, invalid_data], ignore_index=True)
+        else:
+            combined_data = filtered_data
 
         st.write("Identifying primary keywords within clusters...")
         cluster_data = combined_data[['Cluster ID', 'Keywords']]
