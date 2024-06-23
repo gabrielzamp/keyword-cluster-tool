@@ -6,25 +6,6 @@ from scipy.cluster.hierarchy import linkage, fcluster
 import openai
 import time
 
-# Function to generate embeddings
-def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
-    text = text.replace("\n", " ")
-    retries = 0
-    while retries <= max_retries:
-        try:
-            return openai.Embedding.create(input=[text], model=model)['data'][0]['embedding']
-        except Exception as e:
-            retries += 1
-            if retries <= max_retries:
-                time.sleep(2 ** retries)
-            else:
-                return None
-
-# Function to analyze similarity distribution
-def plot_similarity_distribution(similarities):
-    hist, bin_edges = np.histogram(similarities, bins=30)
-    st.bar_chart(pd.DataFrame({'Frequency': hist, 'Cosine Similarity': bin_edges[:-1]}))
-
 # Streamlit page setup
 st.title('Keyword Research Cluster Analysis Tool')
 st.subheader('Leverage OpenAI to cluster similar keywords into groups from your keyword list.')
@@ -43,6 +24,22 @@ if uploaded_file is not None:
 api_key = st.text_input("Enter your OpenAI API key", type="password")
 if api_key:
     openai.api_key = api_key
+
+# Function to generate embeddings
+def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
+    text = text.replace("\n", " ")
+    retries = 0
+    while retries <= max_retries:
+        try:
+            return openai.Embedding.create(input=[text], model=model)['data'][0]['embedding']
+        except Exception as e:
+            st.error(f"Error while generating embedding for text: {text}. Error: {e}")
+            retries += 1
+            if retries <= max_retries:
+                time.sleep(2 ** retries)
+            else:
+                st.error(f"Max retries reached. Skipping keyword: {text}")
+                return None
 
 # Function to choose the best keyword
 def choose_best_keyword(keyword1, keyword2):
@@ -100,53 +97,30 @@ def identify_primary_variants(cluster_data):
 if uploaded_file and api_key:
     # Assuming columns are named 'Keywords', 'Search Volume', and 'CPC'
     keywords = data['Keywords'].tolist()
+    search_volumes = data['Search Volume'].tolist()
+    cpcs = data['CPC'].tolist()
+
     st.write("Generating embeddings for the keywords...")
     embeddings = [get_embedding(keyword) for keyword in keywords if get_embedding(keyword) is not None]
 
     if embeddings:
         st.write("Calculating similarity matrix...")
         similarity_matrix = cosine_similarity(embeddings)
-        similarities = similarity_matrix[np.triu_indices_from(similarity_matrix, 1)]
 
-        st.write("Plotting similarity distribution...")
-        plot_similarity_distribution(similarities)
+        # Incorporate Search Volume and CPC into the similarity matrix
+        for i in range(len(keywords)):
+            for j in range(len(keywords)):
+                if search_volumes[i] != search_volumes[j] or cpcs[i] != cpcs[j]:
+                    similarity_matrix[i][j] = 0
 
-        # Allow user to set clustering threshold
-        threshold = st.slider('Set Clustering Threshold', min_value=0.1, max_value=2.0, value=0.2, step=0.1)
-
-        st.write(f"Using threshold: {threshold}")
-        clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=threshold, criterion='distance')
+        st.write("Clustering keywords...")
+        clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=0.2, criterion='distance')
         data['Cluster ID'] = clusters
 
-        # Check for same CPC and Search Volume within each cluster
-        st.write("Filtering clusters based on CPC and Search Volume...")
-        valid_clusters = []
-        invalid_keywords = []
-        for cluster_id, group in data.groupby('Cluster ID'):
-            if group['Search Volume'].nunique() == 1 and group['CPC'].nunique() == 1:
-                valid_clusters.append(cluster_id)
-            else:
-                invalid_keywords.extend(group['Keywords'].tolist())
-        
-        filtered_data = data[data['Cluster ID'].isin(valid_clusters)]
-        
-        # Assign unique cluster IDs to invalid keywords
-        if len(invalid_keywords) > 0:
-            invalid_data = data[data['Keywords'].isin(invalid_keywords)].copy()
-            max_cluster_id = filtered_data['Cluster ID'].max() if not filtered_data.empty else 0
-            invalid_data['Cluster ID'] = range(max_cluster_id + 1, max_cluster_id + 1 + len(invalid_data))
-            # Combine valid and invalid data
-            combined_data = pd.concat([filtered_data, invalid_data], ignore_index=True)
-        else:
-            combined_data = filtered_data
-
         st.write("Identifying primary keywords within clusters...")
-        cluster_data = combined_data[['Cluster ID', 'Keywords']]
+        cluster_data = data[['Cluster ID', 'Keywords']]
         primary_variant_df = identify_primary_variants(cluster_data)
-        combined_data = pd.merge(combined_data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
-
-        # Drop unnecessary columns and rename if needed
-        combined_data = combined_data.drop(columns=['Unnamed: 3'], errors='ignore')
+        combined_data = pd.merge(data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
 
         # Output results
         st.write("Analysis complete. Review the clusters below:")
