@@ -84,10 +84,11 @@ def identify_primary_variants(cluster_data):
     
     for cluster_id, group in cluster_data.groupby('Cluster ID'):
         keywords = group['Keywords'].tolist()
+        best_keyword_reason = None  # Reset for each cluster
 
         if len(keywords) == 2:
-            best_keyword_reason = choose_best_keyword(keywords[0], keywords[1])
-            primary = best_keyword_reason
+            primary = choose_best_keyword(keywords[0], keywords[1])
+            best_keyword_reason = primary
         else:
             embeddings = [get_embedding(keyword) for keyword in keywords]
             similarity_matrix = cosine_similarity(np.array(embeddings))
