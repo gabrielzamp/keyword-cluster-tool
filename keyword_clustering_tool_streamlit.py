@@ -5,42 +5,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from scipy.cluster.hierarchy import linkage, fcluster
 import openai
 import time
-
-# Streamlit page setup
-st.title('Keyword Research Cluster Analysis Tool')
-st.subheader('Leverage OpenAI to cluster similar keywords into groups from your keyword list.')
-st.write("Created By: Brandon Lazovic")
-st.text("")
-st.markdown("""
-Welcome to the Keyword Analysis Tool! This interactive web application helps SEO professionals and digital marketers analyze and cluster keywords based on their semantic similarity. By leveraging advanced AI embeddings, the tool identifies closely related keywords and suggests optimal groupings for SEO, or to identify the primary keyword to target in a common keyword cluster.
-
-### How to Use:
-1. **Upload a CSV File**: Your CSV should contain a list of keywords, each with associated search volume and cost-per-click (CPC) data.
-2. **Enter Your OpenAI API Key**: The API key is required to generate semantic embeddings via the OpenAI platform.
-
-### Requirements:
-- The CSV file must include the following columns and column names: `Keywords`, `Search Volume`, and `CPC`.
-- Ensure that your OpenAI API key is valid to process embeddings.
-
-Enter your .csv file and OpenAI API key below to get started. This tool will create a table that displays your keyword clusters and .csv to download your results.
-""")
-
-# File uploader
-uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
-if uploaded_file is not None:
-    data = pd.read_csv(uploaded_file)
-    # Check for required columns
-    required_columns = {'Keywords', 'Search Volume', 'CPC'}
-    if not required_columns.issubset(data.columns):
-        st.error("CSV file must include the following columns: Keywords, Search Volume, CPC")
-    else:
-        st.write('Loaded ', len(data), ' rows from the spreadsheet.')
-        # Proceed with processing...
-
-# API Key input
-api_key = st.text_input("Enter your OpenAI API key", type="password")
-if api_key:
-    openai.api_key = api_key
+import matplotlib.pyplot as plt
 
 # Function to generate embeddings
 def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
@@ -50,14 +15,40 @@ def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
         try:
             return openai.Embedding.create(input=[text], model=model)['data'][0]['embedding']
         except Exception as e:
-            st.error(f"Error while generating embedding for text: {text}. Error: {e}")
             retries += 1
             if retries <= max_retries:
-                st.info(f"Retrying {retries}/{max_retries}...")
                 time.sleep(2 ** retries)
             else:
-                st.error(f"Max retries reached. Skipping keyword: {text}")
                 return None
+
+# Function to analyze similarity distribution
+def plot_similarity_distribution(embeddings):
+    similarity_matrix = cosine_similarity(embeddings)
+    similarities = similarity_matrix[np.triu_indices_from(similarity_matrix, 1)]
+    plt.hist(similarities, bins=30)
+    plt.xlabel('Cosine Similarity')
+    plt.ylabel('Frequency')
+    plt.title('Distribution of Pairwise Cosine Similarities')
+    st.pyplot(plt)
+
+# Streamlit page setup
+st.title('Keyword Research Cluster Analysis Tool')
+st.subheader('Leverage OpenAI to cluster similar keywords into groups from your keyword list.')
+
+# File uploader
+uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
+if uploaded_file is not None:
+    data = pd.read_csv(uploaded_file)
+    required_columns = {'Keywords', 'Search Volume', 'CPC'}
+    if not required_columns.issubset(data.columns):
+        st.error("CSV file must include the following columns: Keywords, Search Volume, CPC")
+    else:
+        st.write('Loaded ', len(data), ' rows from the spreadsheet.')
+
+# API Key input
+api_key = st.text_input("Enter your OpenAI API key", type="password")
+if api_key:
+    openai.api_key = api_key
 
 # Function to choose the best keyword
 def choose_best_keyword(keyword1, keyword2):
@@ -115,17 +106,20 @@ def identify_primary_variants(cluster_data):
 if uploaded_file and api_key:
     # Assuming columns are named 'Keywords', 'Search Volume', and 'CPC'
     keywords = data['Keywords'].tolist()
-
-    # Generate embeddings
     st.write("Generating embeddings for the keywords...")
     embeddings = [get_embedding(keyword) for keyword in keywords if get_embedding(keyword) is not None]
 
-    # Calculate similarity and cluster
     if embeddings:
-        st.write("Calculating similarity...")
+        st.write("Plotting similarity distribution...")
+        plot_similarity_distribution(embeddings)
+
         similarity_matrix = cosine_similarity(embeddings)
-        st.write("Clustering keywords...")
-        clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=1.5, criterion='distance')
+
+        # Allow user to set clustering threshold
+        threshold = st.slider('Set Clustering Threshold', min_value=0.1, max_value=2.0, value=1.5, step=0.1)
+
+        st.write(f"Using threshold: {threshold}")
+        clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=threshold, criterion='distance')
         data['Cluster ID'] = clusters
 
         # Check for same CPC and Search Volume within each cluster
@@ -142,8 +136,8 @@ if uploaded_file and api_key:
         
         # Assign unique cluster IDs to invalid keywords
         invalid_data = data[data['Keywords'].isin(invalid_keywords)].copy()
-        invalid_data['Cluster ID'] = range(filtered_data['Cluster ID'].max() + 1, 
-                                           filtered_data['Cluster ID'].max() + 1 + len(invalid_data))
+        invalid_data['Cluster ID'] = list(range(filtered_data['Cluster ID'].max() + 1, 
+                                                 filtered_data['Cluster ID'].max() + 1 + len(invalid_data)))
 
         # Combine valid and invalid data
         combined_data = pd.concat([filtered_data, invalid_data], ignore_index=True)
