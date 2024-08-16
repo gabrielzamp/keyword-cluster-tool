@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.cluster.hierarchy import linkage, fcluster
-import openai
+from openai import OpenAI
 import time
 import io
 
@@ -21,7 +21,7 @@ st.markdown("""
 
 2. **Get Your OpenAI API Key**:
    - If you don't have an OpenAI API key, sign up at [OpenAI](https://openai.com).
-   - Ensure you have access to the GPT-3 or GPT-4 model.
+   - Ensure you have access to the GPT-4 model.
 
 3. **Upload Your File**:
    - Use the file uploader below to upload your CSV file.
@@ -76,8 +76,9 @@ if uploaded_file is not None:
 api_key = st.text_input("Enter your OpenAI API key", type="password")
 
 # Initialize OpenAI client
+client = None
 if api_key:
-    openai.api_key = api_key
+    client = OpenAI(api_key=api_key)
 
 # Function to generate embeddings
 def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
@@ -85,8 +86,8 @@ def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
     retries = 0
     while retries <= max_retries:
         try:
-            response = openai.Embedding.create(input=[text], model=model)
-            return response['data'][0]['embedding']
+            response = client.embeddings.create(input=[text], model=model)
+            return response.data[0].embedding
         except Exception as e:
             st.error(f"Error while generating embedding for text: {text}. Error: {e}")
             retries += 1
@@ -99,24 +100,27 @@ def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
 # Function to choose the best keyword
 def choose_best_keyword(keyword1, keyword2):
     prompt = f"Identify which keyword users are more likely to search on Google for SEO: '{keyword1}' or '{keyword2}'. Only include the keyword in the response. If both keywords are similar, select the first one. You must choose a keyword based on which one has the best grammar, spelling, or natural language."
-    response = openai.Completion.create(
-        model="text-davinci-002",
-        prompt=prompt,
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are an SEO expert tasked with selecting the best keyword for search optimization."},
+            {"role": "user", "content": prompt}
+        ],
         max_tokens=20
     )
-    best_keyword_reason = response.choices[0].text.strip()
+    best_keyword_reason = response.choices[0].message.content.strip()
 
     if keyword1.lower() in best_keyword_reason.lower():
         return keyword1
     elif keyword2.lower() in best_keyword_reason.lower():
         return keyword2
     else:
-        st.warning(f"Unexpected response from GPT: {best_keyword_reason}")
+        st.warning(f"Unexpected response from GPT-4: {best_keyword_reason}")
         return keyword1  # Fallback to the first keyword
 
 # Function to identify primary variants
 def identify_primary_variants(cluster_data):
-    primary_variant_df = pd.DataFrame(columns=['Cluster ID', 'Keywords', 'Is Primary', 'Primary Keyword', 'GPT Reason'])
+    primary_variant_df = pd.DataFrame(columns=['Cluster ID', 'Keywords', 'Is Primary', 'Primary Keyword', 'GPT-4 Reason'])
     new_rows = []
     
     for cluster_id, group in cluster_data.groupby('Cluster ID'):
@@ -142,7 +146,7 @@ def identify_primary_variants(cluster_data):
                 'Keywords': keyword,
                 'Is Primary': is_primary,
                 'Primary Keyword': primary,
-                'GPT Reason': gpt_reason
+                'GPT-4 Reason': gpt_reason
             }
             new_rows.append(new_row)
 
