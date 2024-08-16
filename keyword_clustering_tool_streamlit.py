@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.cluster.hierarchy import linkage, fcluster
-import openai
+from openai
 import time
 import io
 
@@ -74,8 +74,9 @@ if uploaded_file is not None:
 
 # API Key input
 api_key = st.text_input("Enter your OpenAI API key", type="password")
-if api_key:
-    client = OpenAI(api_key=api_key)
+
+# Initialize client variable
+client = None
 
 # Function to generate embeddings
 def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
@@ -98,7 +99,7 @@ def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
 def choose_best_keyword(keyword1, keyword2):
     prompt = f"Identify which keyword users are more likely to search on Google for SEO: '{keyword1}' or '{keyword2}'. Only include the keyword in the response. If both keywords are similar, select the first one. You must choose a keyword based on which one has the best grammar, spelling, or natural language."
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": "You are an SEO expert tasked with selecting the best keyword for search optimization."},
             {"role": "user", "content": prompt}
@@ -150,7 +151,9 @@ def identify_primary_variants(cluster_data):
     return pd.DataFrame(new_rows)
 
 # Process the data if both file and API key are provided
-if uploaded_file and api_key:
+if uploaded_file is not None and api_key:
+    client = OpenAI(api_key=api_key)
+    
     # Assuming columns are named 'Keywords', 'Search Volume', and 'CPC'
     keywords = data['Keywords'].tolist()
     search_volumes = data['Search Volume'].tolist()
@@ -186,3 +189,9 @@ if uploaded_file and api_key:
         st.download_button('Download Analysis Results', combined_data.to_csv(index=False).encode('utf-8'), 'analysis_results.csv', 'text/csv', key='download-csv')
     else:
         st.error("Failed to generate embeddings for all keywords.")
+elif uploaded_file is None and api_key:
+    st.warning("Please upload a CSV file to proceed.")
+elif uploaded_file is not None and not api_key:
+    st.warning("Please enter your OpenAI API key to proceed.")
+else:
+    st.info("Please upload a CSV file and enter your OpenAI API key to start the analysis.")
