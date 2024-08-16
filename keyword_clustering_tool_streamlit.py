@@ -101,7 +101,7 @@ def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
 def choose_best_keyword(keyword1, keyword2):
     prompt = f"Identify which keyword users are more likely to search on Google for SEO: '{keyword1}' or '{keyword2}'. Only include the keyword in the response. If both keywords are similar, select the first one. You must choose a keyword based on which one has the best grammar, spelling, or natural language."
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4o",
         messages=[
             {"role": "system", "content": "You are an SEO expert tasked with selecting the best keyword for search optimization."},
             {"role": "user", "content": prompt}
