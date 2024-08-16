@@ -3,12 +3,64 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.cluster.hierarchy import linkage, fcluster
-import openai
+from openai import OpenAI
 import time
+import io
 
 # Streamlit page setup
 st.title('Keyword Research Cluster Analysis Tool')
 st.subheader('Leverage OpenAI to cluster similar keywords into groups from your keyword list.')
+
+# Instructions
+st.markdown("""
+## How to Use This Tool
+
+1. **Prepare Your Data**: 
+   - Create a CSV file with the following columns: 'Keywords', 'Search Volume', and 'CPC'.
+   - Ensure your data is clean and formatted correctly.
+
+2. **Get Your OpenAI API Key**:
+   - If you don't have an OpenAI API key, sign up at [OpenAI](https://openai.com).
+   - Ensure you have access to the GPT-4 model.
+
+3. **Upload Your File**:
+   - Use the file uploader below to upload your CSV file.
+
+4. **Enter Your API Key**:
+   - Input your OpenAI API key in the text box provided.
+
+5. **Run the Analysis**:
+   - The tool will automatically process your data once both the file and API key are provided.
+
+6. **Review Results**:
+   - Examine the clustered keywords and primary variants in the displayed table.
+
+7. **Download Results**:
+   - Use the download button to get a CSV file of your analysis results.
+
+## Sample CSV Template
+
+You can download a sample CSV template to see the required format:
+""")
+
+# Sample CSV template
+sample_data = pd.DataFrame({
+    'Keywords': ['buy shoes online', 'purchase shoes online', 'best running shoes', 'comfortable walking shoes'],
+    'Search Volume': [1000, 800, 1500, 1200],
+    'CPC': [0.5, 0.4, 0.7, 0.6]
+})
+
+# Create a download button for the sample CSV
+csv_buffer = io.StringIO()
+sample_data.to_csv(csv_buffer, index=False)
+csv_str = csv_buffer.getvalue()
+
+st.download_button(
+    label="Download Sample CSV Template",
+    data=csv_str,
+    file_name="sample_keyword_data.csv",
+    mime="text/csv"
+)
 
 # File uploader
 uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
@@ -23,7 +75,7 @@ if uploaded_file is not None:
 # API Key input
 api_key = st.text_input("Enter your OpenAI API key", type="password")
 if api_key:
-    openai.api_key = api_key
+    client = OpenAI(api_key=api_key)
 
 # Function to generate embeddings
 def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
@@ -31,7 +83,8 @@ def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
     retries = 0
     while retries <= max_retries:
         try:
-            return openai.Embedding.create(input=[text], model=model)['data'][0]['embedding']
+            response = client.embeddings.create(input=[text], model=model)
+            return response.data[0].embedding
         except Exception as e:
             st.error(f"Error while generating embedding for text: {text}. Error: {e}")
             retries += 1
@@ -44,24 +97,27 @@ def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
 # Function to choose the best keyword
 def choose_best_keyword(keyword1, keyword2):
     prompt = f"Identify which keyword users are more likely to search on Google for SEO: '{keyword1}' or '{keyword2}'. Only include the keyword in the response. If both keywords are similar, select the first one. You must choose a keyword based on which one has the best grammar, spelling, or natural language."
-    response = openai.Completion.create(
-        model="gpt-3.5-turbo-instruct",
-        prompt=prompt,
+    response = client.chat.completions.create(
+        model="gpt-4",
+        messages=[
+            {"role": "system", "content": "You are an SEO expert tasked with selecting the best keyword for search optimization."},
+            {"role": "user", "content": prompt}
+        ],
         max_tokens=20
     )
-    best_keyword_reason = response['choices'][0]['text'].strip()
+    best_keyword_reason = response.choices[0].message.content.strip()
 
     if keyword1.lower() in best_keyword_reason.lower():
         return keyword1
     elif keyword2.lower() in best_keyword_reason.lower():
         return keyword2
     else:
-        st.warning(f"Unexpected response from GPT-3.5 Turbo: {best_keyword_reason}")
+        st.warning(f"Unexpected response from GPT-4: {best_keyword_reason}")
         return keyword1  # Fallback to the first keyword
 
 # Function to identify primary variants
 def identify_primary_variants(cluster_data):
-    primary_variant_df = pd.DataFrame(columns=['Cluster ID', 'Keywords', 'Is Primary', 'Primary Keyword', 'GPT-3.5 Reason'])
+    primary_variant_df = pd.DataFrame(columns=['Cluster ID', 'Keywords', 'Is Primary', 'Primary Keyword', 'GPT-4 Reason'])
     new_rows = []
     
     for cluster_id, group in cluster_data.groupby('Cluster ID'):
@@ -87,7 +143,7 @@ def identify_primary_variants(cluster_data):
                 'Keywords': keyword,
                 'Is Primary': is_primary,
                 'Primary Keyword': primary,
-                'GPT-3.5 Reason': gpt_reason
+                'GPT-4 Reason': gpt_reason
             }
             new_rows.append(new_row)
 
