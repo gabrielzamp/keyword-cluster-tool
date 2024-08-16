@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.cluster.hierarchy import linkage, fcluster
-import openai
+from openai import OpenAI
 import time
 import io
 
@@ -75,13 +75,19 @@ if uploaded_file is not None:
 # API Key input
 api_key = st.text_input("Enter your OpenAI API key", type="password")
 
+# Initialize OpenAI client
+client = None
+if api_key:
+    client = OpenAI(api_key=api_key)
+
 # Function to generate embeddings
 def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
     text = text.replace("\n", " ")
     retries = 0
     while retries <= max_retries:
         try:
-            return openai.Embedding.create(input=[text], model=model)['data'][0]['embedding']
+            response = client.embeddings.create(input=[text], model=model)
+            return response.data[0].embedding
         except Exception as e:
             st.error(f"Error while generating embedding for text: {text}. Error: {e}")
             retries += 1
@@ -94,8 +100,8 @@ def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
 # Function to choose the best keyword
 def choose_best_keyword(keyword1, keyword2):
     prompt = f"Identify which keyword users are more likely to search on Google for SEO: '{keyword1}' or '{keyword2}'. Only include the keyword in the response. If both keywords are similar, select the first one. You must choose a keyword based on which one has the best grammar, spelling, or natural language."
-    response = openai.Completion.create(
-        engine="text-davinci-002",
+    response = client.completions.create(
+        model="text-davinci-002",
         prompt=prompt,
         max_tokens=20
     )
@@ -145,8 +151,6 @@ def identify_primary_variants(cluster_data):
 
 # Process the data if both file and API key are provided
 if uploaded_file is not None and api_key:
-    openai.api_key = api_key
-    
     # Assuming columns are named 'Keywords', 'Search Volume', and 'CPC'
     keywords = data['Keywords'].tolist()
     search_volumes = data['Search Volume'].tolist()
