@@ -1,5 +1,6 @@
-streamlit
-pandas
-numpy
-scikit-learn
-openai
+streamlit==1.25.0
+pandas==2.1.1
+numpy==1.25.2
+scikit-learn==1.3.0
+scipy==1.11.2
+openai==0.28.0
