@@ -100,23 +100,15 @@ async def generate_embeddings(keywords):
         tasks = [fetch_embedding(session, keyword) for keyword in keywords]
         results = []
         for i, task in enumerate(asyncio.as_completed(tasks), start=1):
-            try:
-                result = await asyncio.wait_for(task, timeout=30)  # 30-second timeout
-                results.append(result)
-            except asyncio.TimeoutError:
-                st.warning(f"Timeout occurred for keyword {i}. Skipping...")
-                results.append(None)
-            except Exception as e:
-                st.error(f"Error processing keyword {i}: {str(e)}")
-                results.append(None)
-            
+            result = await task
+            results.append(result)
             progress_bar.progress(i / total_keywords)
-            progress_text.text(f"Processed {i}/{total_keywords} keywords")
+            progress_text.text(f"Processed {i}/{total_keywords} keywords for embeddings")
 
     embeddings = [res for res in results if res is not None]
     valid_keywords = [kw for kw, res in zip(keywords, results) if res is not None]
 
-    st.write(f"Successfully generated embeddings for {len(embeddings)} out of {total_keywords} keywords.")
+    progress_text.text(f"Successfully generated embeddings for {len(embeddings)} out of {total_keywords} keywords.")
     return embeddings, valid_keywords
 
 async def choose_best_keyword(session, keyword1, keyword2):
@@ -181,8 +173,7 @@ async def identify_primary_variants(session, cluster_data):
             }
             new_rows.append(new_row)
         progress_bar.progress(i / total_clusters)
-        progress_text.empty()
-        progress_text.write(f"Processed {i}/{total_clusters} clusters", unsafe_allow_html=True)
+        progress_text.text(f"Processed {i}/{total_clusters} clusters")
 
     return pd.DataFrame(new_rows)
 
