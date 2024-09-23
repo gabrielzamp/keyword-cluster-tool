@@ -70,6 +70,20 @@ if uploaded_file is not None:
 
 api_key = st.text_input("Enter your OpenAI API key", type="password")
 
+# Global progress bar and text
+progress_bar = None
+progress_text = None
+
+def init_progress():
+    global progress_bar, progress_text
+    progress_bar = st.progress(0)
+    progress_text = st.empty()
+
+def update_progress(current, total, message):
+    global progress_bar, progress_text
+    progress_bar.progress(current / total)
+    progress_text.text(f"{message} ({current}/{total})")
+
 async def fetch_embedding(session, text, model="text-embedding-ada-002", max_retries=3):
     retries = 0
     while retries < max_retries:
@@ -92,23 +106,20 @@ async def fetch_embedding(session, text, model="text-embedding-ada-002", max_ret
 
 async def generate_embeddings(keywords):
     embeddings = []
-    progress_bar = st.progress(0)
-    progress_text = st.empty()
     total_keywords = len(keywords)
-
+    
     async with aiohttp.ClientSession() as session:
         tasks = [fetch_embedding(session, keyword) for keyword in keywords]
         results = []
         for i, task in enumerate(asyncio.as_completed(tasks), start=1):
             result = await task
             results.append(result)
-            progress_bar.progress(i / total_keywords)
-            progress_text.text(f"Processed {i}/{total_keywords} keywords for embeddings")
+            update_progress(i, total_keywords, "Generating embeddings")
 
     embeddings = [res for res in results if res is not None]
     valid_keywords = [kw for kw, res in zip(keywords, results) if res is not None]
 
-    progress_text.text(f"Successfully generated embeddings for {len(embeddings)} out of {total_keywords} keywords.")
+    update_progress(total_keywords, total_keywords, f"Generated embeddings for {len(embeddings)} out of {total_keywords} keywords")
     return embeddings, valid_keywords
 
 async def choose_best_keyword(session, keyword1, keyword2):
@@ -143,8 +154,6 @@ async def identify_primary_variants(session, cluster_data):
     primary_variant_df = pd.DataFrame(columns=['Cluster ID', 'Keywords', 'Is Primary', 'Primary Keyword', 'GPT-4 Reason'])
     new_rows = []
     total_clusters = cluster_data['Cluster ID'].nunique()
-    progress_bar = st.progress(0)
-    progress_text = st.empty()
 
     for i, (cluster_id, group) in enumerate(cluster_data.groupby('Cluster ID'), start=1):
         keywords = group['Keywords'].tolist()
@@ -172,12 +181,13 @@ async def identify_primary_variants(session, cluster_data):
                 'GPT-4 Reason': primary
             }
             new_rows.append(new_row)
-        progress_bar.progress(i / total_clusters)
-        progress_text.text(f"Processed {i}/{total_clusters} clusters")
+        update_progress(i, total_clusters, "Processing clusters")
 
     return pd.DataFrame(new_rows)
 
 async def process_data(keywords, search_volumes, cpcs):
+    init_progress()
+    
     st.write("Generating embeddings for the keywords...")
     embeddings, valid_keywords = await generate_embeddings(keywords)
 
