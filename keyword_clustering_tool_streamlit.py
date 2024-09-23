@@ -8,11 +8,9 @@ from scipy.cluster.hierarchy import linkage, fcluster
 import io
 from openai import OpenAI
 
-# Streamlit page setup
 st.title('Keyword Research Cluster Analysis Tool')
 st.subheader('Leverage OpenAI to cluster similar keywords into groups from your keyword list.')
 
-# Instructions
 st.markdown("""
 ## How to Use This Tool
 
@@ -44,14 +42,12 @@ st.markdown("""
 You can download a sample CSV template to see the required format:
 """)
 
-# Sample CSV template
 sample_data = pd.DataFrame({
     'Keywords': ['buy shoes online', 'purchase shoes online', 'best running shoes', 'comfortable walking shoes'],
     'Search Volume': [1000, 800, 1500, 1200],
     'CPC': [0.5, 0.4, 0.7, 0.6]
 })
 
-# Create a download button for the sample CSV
 csv_buffer = io.StringIO()
 sample_data.to_csv(csv_buffer, index=False)
 csv_str = csv_buffer.getvalue()
@@ -63,7 +59,6 @@ st.download_button(
     mime="text/csv"
 )
 
-# File uploader
 uploaded_file = st.file_uploader("Choose a CSV file", type="csv")
 if uploaded_file is not None:
     data = pd.read_csv(uploaded_file)
@@ -73,10 +68,8 @@ if uploaded_file is not None:
     else:
         st.write(f'Loaded {len(data)} rows from the spreadsheet.')
 
-# API Key input
 api_key = st.text_input("Enter your OpenAI API key", type="password")
 
-# Asynchronous function to get embeddings in parallel with timeout and retry logic
 async def fetch_embedding(session, text, model="text-embedding-ada-002", max_retries=3):
     retries = 0
     while retries < max_retries:
@@ -85,7 +78,7 @@ async def fetch_embedding(session, text, model="text-embedding-ada-002", max_ret
                 "https://api.openai.com/v1/embeddings",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={"input": text, "model": model},
-                timeout=10  # Set a timeout for the request
+                timeout=10
             )
             result = await response.json()
             return result['data'][0]['embedding']
@@ -97,12 +90,11 @@ async def fetch_embedding(session, text, model="text-embedding-ada-002", max_ret
     st.error(f"Failed to fetch embedding for '{text}' after {max_retries} attempts.")
     return None
 
-# Function to generate embeddings asynchronously with progress tracking and validation
 async def generate_embeddings(keywords):
     embeddings = []
     progress_bar = st.progress(0)
     total_keywords = len(keywords)
-    progress_text = st.empty()  # Create a placeholder for progress updates
+    progress_text = st.empty()
 
     async with aiohttp.ClientSession() as session:
         tasks = [fetch_embedding(session, keyword) for keyword in keywords]
@@ -111,16 +103,15 @@ async def generate_embeddings(keywords):
             result = await task
             results.append(result)
             progress_bar.progress(i / total_keywords)
-            progress_text.text(f"Processed {i}/{total_keywords} keywords for embeddings")  # Update on the same line
+            progress_text.empty()  # Clear previous text
+            progress_text.write(f"Processed {i}/{total_keywords} keywords for embeddings", unsafe_allow_html=True)
 
-    # Filter out None values and validate lengths
     embeddings = [res for res in results if res is not None]
     valid_keywords = [kw for kw, res in zip(keywords, results) if res is not None]
 
     st.write(f"Successfully generated embeddings for {len(embeddings)} out of {total_keywords} keywords.")
     return embeddings, valid_keywords
 
-# Function to choose the best keyword between two options using GPT-4
 async def choose_best_keyword(session, keyword1, keyword2):
     prompt = f"Identify which keyword users are more likely to search on Google for SEO: '{keyword1}' or '{keyword2}'. Only include the keyword in the response. If both keywords are similar, select the first one."
     try:
@@ -144,21 +135,21 @@ async def choose_best_keyword(session, keyword1, keyword2):
             return keyword2
         else:
             st.warning(f"Unexpected response from GPT-4: {best_keyword}")
-            return keyword1  # Fallback to the first keyword
+            return keyword1
     except Exception as e:
         st.error(f"Error choosing best keyword: {e}")
-        return keyword1  # Fallback to the first keyword
+        return keyword1
 
-# Function to identify primary variants with progress tracking
 async def identify_primary_variants(session, cluster_data):
     primary_variant_df = pd.DataFrame(columns=['Cluster ID', 'Keywords', 'Is Primary', 'Primary Keyword', 'GPT-4 Reason'])
     new_rows = []
     total_clusters = cluster_data['Cluster ID'].nunique()
     progress_bar = st.progress(0)
+    progress_text = st.empty()
 
     for i, (cluster_id, group) in enumerate(cluster_data.groupby('Cluster ID'), start=1):
         keywords = group['Keywords'].tolist()
-        primary = None  # Initialize primary keyword
+        primary = None
 
         if len(keywords) == 2:
             primary = await choose_best_keyword(session, keywords[0], keywords[1])
@@ -179,15 +170,15 @@ async def identify_primary_variants(session, cluster_data):
                 'Keywords': keyword,
                 'Is Primary': is_primary,
                 'Primary Keyword': primary,
-                'GPT-4 Reason': primary  # Reason can be expanded if necessary
+                'GPT-4 Reason': primary
             }
             new_rows.append(new_row)
         progress_bar.progress(i / total_clusters)
-        progress_text.text(f"Processed {i}/{total_clusters} clusters")
+        progress_text.empty()
+        progress_text.write(f"Processed {i}/{total_clusters} clusters", unsafe_allow_html=True)
 
     return pd.DataFrame(new_rows)
 
-# Function to process the data and run the analysis
 async def process_data(keywords, search_volumes, cpcs):
     st.write("Generating embeddings for the keywords...")
     embeddings, valid_keywords = await generate_embeddings(keywords)
@@ -196,7 +187,6 @@ async def process_data(keywords, search_volumes, cpcs):
         st.write("Calculating similarity matrix...")
         similarity_matrix = cosine_similarity(embeddings)
 
-        # Clustering keywords
         st.write("Clustering keywords...")
         try:
             clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=0.2, criterion='distance')
@@ -206,17 +196,14 @@ async def process_data(keywords, search_volumes, cpcs):
             filtered_data = data[data['Keywords'].isin(valid_keywords)].copy()
             filtered_data['Cluster ID'] = clusters
 
-            # Identifying primary keywords within clusters
             st.write("Identifying primary keywords within clusters...")
             async with aiohttp.ClientSession() as session:
                 primary_variant_df = await identify_primary_variants(session, filtered_data[['Cluster ID', 'Keywords']])
                 combined_data = pd.merge(filtered_data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
 
-            # Output results
             st.write("Analysis complete. Review the clusters below:")
             st.dataframe(combined_data)
 
-            # Download link
             st.download_button(
                 label='Download Analysis Results',
                 data=combined_data.to_csv(index=False).encode('utf-8'),
@@ -229,7 +216,6 @@ async def process_data(keywords, search_volumes, cpcs):
     else:
         st.error("Failed to generate embeddings for all keywords.")
 
-# Run the analysis if both file and API key are provided
 if uploaded_file is not None and api_key:
     keywords = data['Keywords'].tolist()
     search_volumes = data['Search Volume'].tolist()
@@ -241,5 +227,3 @@ elif uploaded_file is not None and not api_key:
     st.warning("Please enter your OpenAI API key to proceed.")
 else:
     st.info("Please upload a CSV file and enter your OpenAI API key to start the analysis.")
-
-
