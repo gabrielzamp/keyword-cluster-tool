@@ -7,7 +7,6 @@ from sklearn.metrics.pairwise import cosine_similarity
 from scipy.cluster.hierarchy import linkage, fcluster
 import io
 from openai import OpenAI
-
 # Streamlit page setup
 st.title('Keyword Research Cluster Analysis Tool')
 st.subheader('Leverage OpenAI to cluster similar keywords into groups from your keyword list.')
@@ -71,7 +70,7 @@ if uploaded_file is not None:
     if not required_columns.issubset(data.columns):
         st.error("CSV file must include the following columns: Keywords, Search Volume, CPC")
     else:
-        st.write('Loaded ', len(data), ' rows from the spreadsheet.')
+        st.write(f'Loaded {len(data)} rows from the spreadsheet.')
 
 # API Key input
 api_key = st.text_input("Enter your OpenAI API key", type="password")
@@ -90,7 +89,7 @@ async def fetch_embedding(session, text, model="text-embedding-ada-002"):
         st.error(f"Error fetching embedding for '{text}': {e}")
         return None
 
-# Function to generate embeddings asynchronously with progress tracking
+# Function to generate embeddings asynchronously with progress tracking and validation
 async def generate_embeddings(keywords):
     embeddings = []
     progress_bar = st.progress(0)
@@ -98,14 +97,19 @@ async def generate_embeddings(keywords):
 
     async with aiohttp.ClientSession() as session:
         tasks = [fetch_embedding(session, keyword) for keyword in keywords]
+        results = []
         for i, task in enumerate(asyncio.as_completed(tasks), start=1):
             result = await task
-            if result is not None:
-                embeddings.append(result)
+            results.append(result)
             progress_bar.progress(i / total_keywords)
             st.write(f"Processed {i}/{total_keywords} keywords for embeddings")
 
-    return embeddings
+    # Filter out None values and validate lengths
+    embeddings = [res for res in results if res is not None]
+    valid_keywords = [kw for kw, res in zip(keywords, results) if res is not None]
+
+    st.write(f"Successfully generated embeddings for {len(embeddings)} out of {total_keywords} keywords.")
+    return embeddings, valid_keywords
 
 # Function to choose the best keyword between two options using GPT-4
 async def choose_best_keyword(session, keyword1, keyword2):
@@ -150,11 +154,14 @@ async def identify_primary_variants(session, cluster_data):
         if len(keywords) == 2:
             primary = await choose_best_keyword(session, keywords[0], keywords[1])
         else:
-            embeddings = await generate_embeddings(keywords)
+            embeddings, valid_keywords = await generate_embeddings(keywords)
+            if not embeddings:
+                st.error(f"Failed to generate embeddings for cluster {cluster_id}. Skipping...")
+                continue
             similarity_matrix = cosine_similarity(np.array(embeddings))
             avg_similarity = np.mean(similarity_matrix, axis=1)
             primary_idx = np.argmax(avg_similarity)
-            primary = keywords[primary_idx]
+            primary = valid_keywords[primary_idx]
 
         for keyword in keywords:
             is_primary = 'Yes' if keyword == primary else 'No'
@@ -174,7 +181,7 @@ async def identify_primary_variants(session, cluster_data):
 # Function to process the data and run the analysis
 async def process_data(keywords, search_volumes, cpcs):
     st.write("Generating embeddings for the keywords...")
-    embeddings = await generate_embeddings(keywords)
+    embeddings, valid_keywords = await generate_embeddings(keywords)
 
     if embeddings:
         st.write("Calculating similarity matrix...")
@@ -182,21 +189,34 @@ async def process_data(keywords, search_volumes, cpcs):
 
         # Clustering keywords
         st.write("Clustering keywords...")
-        clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=0.2, criterion='distance')
-        data['Cluster ID'] = clusters
+        try:
+            clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=0.2, criterion='distance')
+            if len(clusters) != len(valid_keywords):
+                st.error("Mismatch between the number of clusters and keywords. Check embedding process for errors.")
+                return
+            filtered_data = data[data['Keywords'].isin(valid_keywords)].copy()
+            filtered_data['Cluster ID'] = clusters
 
-        # Identifying primary keywords
-        st.write("Identifying primary keywords within clusters...")
-        async with aiohttp.ClientSession() as session:
-            primary_variant_df = await identify_primary_variants(session, data[['Cluster ID', 'Keywords']])
-            combined_data = pd.merge(data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
+            # Identifying primary keywords within clusters
+            st.write("Identifying primary keywords within clusters...")
+            async with aiohttp.ClientSession() as session:
+                primary_variant_df = await identify_primary_variants(session, filtered_data[['Cluster ID', 'Keywords']])
+                combined_data = pd.merge(filtered_data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
 
-        # Output results
-        st.write("Analysis complete. Review the clusters below:")
-        st.dataframe(combined_data)
+            # Output results
+            st.write("Analysis complete. Review the clusters below:")
+            st.dataframe(combined_data)
 
-        # Download link
-        st.download_button('Download Analysis Results', combined_data.to_csv(index=False).encode('utf-8'), 'analysis_results.csv', 'text/csv', key='download-csv')
+            # Download link
+            st.download_button(
+                'Download Analysis Results',
+                combined_data.to_csv(index=False).encode('utf-8'),
+                'analysis_results.csv',
+                'text/csv',
+                key='download-csv'
+            )
+        except ValueError as e:
+            st.error(f"Error during clustering: {e}. Ensure that embeddings are properly generated.")
     else:
         st.error("Failed to generate embeddings for all keywords.")
 
