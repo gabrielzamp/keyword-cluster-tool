@@ -188,9 +188,9 @@ with suppress_stdout():
                 df = pd.DataFrame({
                     'Keywords': valid_keywords,
                     'Search Volume': [search_volumes[keywords.index(kw)] for kw in valid_keywords],
-                    'CPC': [cpcs[keywords.index(kw)] for kw in valid_keywords]
+                    'CPC': [cpcs[keywords.index(kw)] for kw in valid_keywords],
+                    'Embedding': embeddings
                 })
-                df['Embedding'] = embeddings
     
                 # Group by Search Volume and CPC
                 grouped = df.groupby(['Search Volume', 'CPC'])
@@ -213,6 +213,11 @@ with suppress_stdout():
                     else:
                         # Assign -1 to indicate this keyword is not in any cluster
                         clusters.extend([-1] * len(group))
+    
+                # Ensure clusters list has the same length as df
+                if len(clusters) != len(df):
+                    st.error(f"Mismatch in cluster assignments. Clusters: {len(clusters)}, DataFrame rows: {len(df)}")
+                    return
     
                 df['Cluster ID'] = clusters
     
