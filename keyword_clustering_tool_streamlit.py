@@ -121,7 +121,7 @@ with suppress_stdout():
                 "https://api.openai.com/v1/chat/completions",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={
-                    "model": "gpt-4",
+                    "model": "gpt-4o-mini",
                     "messages": [
                         {"role": "system", "content": "You are an SEO expert tasked with selecting the best keyword for search optimization."},
                         {"role": "user", "content": prompt}
