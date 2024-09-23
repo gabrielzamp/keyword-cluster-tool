@@ -1,12 +1,3 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-from sklearn.metrics.pairwise import cosine_similarity
-from scipy.cluster.hierarchy import linkage, fcluster
-from openai import OpenAI
-import time
-import io
-
 # Streamlit page setup
 st.title('Keyword Research Cluster Analysis Tool')
 st.subheader('Leverage OpenAI to cluster similar keywords into groups from your keyword list.')
@@ -75,111 +66,108 @@ if uploaded_file is not None:
 # API Key input
 api_key = st.text_input("Enter your OpenAI API key", type="password")
 
-# Initialize OpenAI client
-client = None
-if api_key:
-    client = OpenAI(api_key=api_key)
+# Asynchronous function to get embeddings in parallel
+async def fetch_embedding(session, text, model="text-embedding-ada-002"):
+    try:
+        response = await session.post(
+            "https://api.openai.com/v1/embeddings",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={"input": text, "model": model}
+        )
+        result = await response.json()
+        return result['data'][0]['embedding']
+    except Exception as e:
+        st.error(f"Error fetching embedding for '{text}': {e}")
+        return None
 
-# Function to generate embeddings
-def get_embedding(text, model="text-embedding-ada-002", max_retries=3):
-    text = text.replace("\n", " ")
-    retries = 0
-    while retries <= max_retries:
-        try:
-            response = client.embeddings.create(input=[text], model=model)
-            return response.data[0].embedding
-        except Exception as e:
-            st.error(f"Error while generating embedding for text: {text}. Error: {e}")
-            retries += 1
-            if retries <= max_retries:
-                time.sleep(2 ** retries)
-            else:
-                st.error(f"Max retries reached. Skipping keyword: {text}")
-                return None
+# Function to generate embeddings asynchronously
+async def generate_embeddings(keywords):
+    embeddings = []
+    async with aiohttp.ClientSession() as session:
+        tasks = [fetch_embedding(session, keyword) for keyword in keywords]
+        results = await asyncio.gather(*tasks)
+        embeddings = [res for res in results if res is not None]
+    return embeddings
 
-# Function to choose the best keyword
-def choose_best_keyword(keyword1, keyword2):
-    prompt = f"Identify which keyword users are more likely to search on Google for SEO: '{keyword1}' or '{keyword2}'. Only include the keyword in the response. If both keywords are similar, select the first one. You must choose a keyword based on which one has the best grammar, spelling, or natural language."
-    response = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[
-            {"role": "system", "content": "You are an SEO expert tasked with selecting the best keyword for search optimization."},
-            {"role": "user", "content": prompt}
-        ],
-        max_tokens=20
-    )
-    best_keyword_reason = response.choices[0].message.content.strip()
-
-    if keyword1.lower() in best_keyword_reason.lower():
-        return keyword1
-    elif keyword2.lower() in best_keyword_reason.lower():
-        return keyword2
-    else:
-        st.warning(f"Unexpected response from GPT-4: {best_keyword_reason}")
+# Function to choose the best keyword between two options using GPT-4
+async def choose_best_keyword(session, keyword1, keyword2):
+    prompt = f"Identify which keyword users are more likely to search on Google for SEO: '{keyword1}' or '{keyword2}'. Only include the keyword in the response. If both keywords are similar, select the first one."
+    try:
+        response = await session.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "model": "gpt-4",
+                "messages": [
+                    {"role": "system", "content": "You are an SEO expert tasked with selecting the best keyword for search optimization."},
+                    {"role": "user", "content": prompt}
+                ],
+                "max_tokens": 20
+            }
+        )
+        result = await response.json()
+        best_keyword = result['choices'][0]['message']['content'].strip()
+        if keyword1.lower() in best_keyword.lower():
+            return keyword1
+        elif keyword2.lower() in best_keyword.lower():
+            return keyword2
+        else:
+            st.warning(f"Unexpected response from GPT-4: {best_keyword}")
+            return keyword1  # Fallback to the first keyword
+    except Exception as e:
+        st.error(f"Error choosing best keyword: {e}")
         return keyword1  # Fallback to the first keyword
 
 # Function to identify primary variants
-def identify_primary_variants(cluster_data):
+async def identify_primary_variants(session, cluster_data):
     primary_variant_df = pd.DataFrame(columns=['Cluster ID', 'Keywords', 'Is Primary', 'Primary Keyword', 'GPT-4 Reason'])
     new_rows = []
     
     for cluster_id, group in cluster_data.groupby('Cluster ID'):
         keywords = group['Keywords'].tolist()
-        best_keyword_reason = None  # Reset for each cluster
         primary = None  # Initialize primary keyword
 
         if len(keywords) == 2:
-            primary = choose_best_keyword(keywords[0], keywords[1])
-            best_keyword_reason = primary
+            primary = await choose_best_keyword(session, keywords[0], keywords[1])
         else:
-            embeddings = [get_embedding(keyword) for keyword in keywords]
+            embeddings = await generate_embeddings(keywords)
             similarity_matrix = cosine_similarity(np.array(embeddings))
             avg_similarity = np.mean(similarity_matrix, axis=1)
             primary_idx = np.argmax(avg_similarity)
             primary = keywords[primary_idx]
 
-        for idx, keyword in enumerate(keywords):
+        for keyword in keywords:
             is_primary = 'Yes' if keyword == primary else 'No'
-            gpt_reason = best_keyword_reason if len(keywords) == 2 else None
             new_row = {
                 'Cluster ID': cluster_id,
                 'Keywords': keyword,
                 'Is Primary': is_primary,
                 'Primary Keyword': primary,
-                'GPT-4 Reason': gpt_reason
+                'GPT-4 Reason': primary  # Reason can be expanded if necessary
             }
             new_rows.append(new_row)
 
     return pd.DataFrame(new_rows)
 
-# Process the data if both file and API key are provided
-if uploaded_file is not None and api_key:
-    # Assuming columns are named 'Keywords', 'Search Volume', and 'CPC'
-    keywords = data['Keywords'].tolist()
-    search_volumes = data['Search Volume'].tolist()
-    cpcs = data['CPC'].tolist()
-
+# Function to process the data and run the analysis
+async def process_data(keywords, search_volumes, cpcs):
     st.write("Generating embeddings for the keywords...")
-    embeddings = [get_embedding(keyword) for keyword in keywords if get_embedding(keyword) is not None]
+    embeddings = await generate_embeddings(keywords)
 
     if embeddings:
         st.write("Calculating similarity matrix...")
         similarity_matrix = cosine_similarity(embeddings)
 
-        # Incorporate Search Volume and CPC into the similarity matrix
-        for i in range(len(keywords)):
-            for j in range(len(keywords)):
-                if search_volumes[i] != search_volumes[j] or cpcs[i] != cpcs[j]:
-                    similarity_matrix[i][j] = 0
-
+        # Clustering keywords
         st.write("Clustering keywords...")
         clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=0.2, criterion='distance')
         data['Cluster ID'] = clusters
 
+        # Identifying primary keywords
         st.write("Identifying primary keywords within clusters...")
-        cluster_data = data[['Cluster ID', 'Keywords']]
-        primary_variant_df = identify_primary_variants(cluster_data)
-        combined_data = pd.merge(data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
+        async with aiohttp.ClientSession() as session:
+            primary_variant_df = await identify_primary_variants(session, data[['Cluster ID', 'Keywords']])
+            combined_data = pd.merge(data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
 
         # Output results
         st.write("Analysis complete. Review the clusters below:")
@@ -189,6 +177,13 @@ if uploaded_file is not None and api_key:
         st.download_button('Download Analysis Results', combined_data.to_csv(index=False).encode('utf-8'), 'analysis_results.csv', 'text/csv', key='download-csv')
     else:
         st.error("Failed to generate embeddings for all keywords.")
+
+# Run the analysis if both file and API key are provided
+if uploaded_file is not None and api_key:
+    keywords = data['Keywords'].tolist()
+    search_volumes = data['Search Volume'].tolist()
+    cpcs = data['CPC'].tolist()
+    asyncio.run(process_data(keywords, search_volumes, cpcs))
 elif uploaded_file is None and api_key:
     st.warning("Please upload a CSV file to proceed.")
 elif uploaded_file is not None and not api_key:
