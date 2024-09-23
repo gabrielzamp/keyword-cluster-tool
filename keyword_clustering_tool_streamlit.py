@@ -189,6 +189,9 @@ async def process_data(keywords, search_volumes, cpcs):
     # Filter out keywords not in any cluster
     df_clustered = df[df['Cluster ID'] != -1].copy()
 
+    # Extract unique keywords that were not clustered
+    unique_keywords = df[df['Cluster ID'] == -1]['Keywords'].tolist()
+
     progress_bar.progress(0.5)
 
     if not df_clustered.empty:
@@ -196,6 +199,7 @@ async def process_data(keywords, search_volumes, cpcs):
             primary_variant_df = await identify_primary_variants(session, df_clustered[['Cluster ID', 'Keywords']])
             combined_data = pd.merge(df_clustered, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
 
+        st.write("### Clustered Keywords")
         st.dataframe(combined_data)
 
         st.download_button(
@@ -204,6 +208,11 @@ async def process_data(keywords, search_volumes, cpcs):
             file_name='analysis_results.csv',
             mime='text/csv'
         )
+
+        # Display unique keywords that were not clustered
+        st.write("### Unique Keywords (Not Clustered)")
+        st.write(unique_keywords)
+
         progress_bar.progress(1.0)
     else:
         st.error("No clusters were formed due to unique CPC and Search Volume values.")
