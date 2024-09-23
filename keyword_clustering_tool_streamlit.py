@@ -6,6 +6,7 @@ import aiohttp
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.cluster.hierarchy import linkage, fcluster
 import io
+from openai import OpenAI
 
 st.title('Keyword Research Cluster Analysis Tool')
 st.subheader('Leverage OpenAI to cluster similar keywords into groups from your keyword list.')
@@ -102,7 +103,7 @@ async def choose_best_keyword(session, keyword1, keyword2):
             "https://api.openai.com/v1/chat/completions",
             headers={"Authorization": f"Bearer {api_key}"},
             json={
-                "model": "gpt-4",
+                "model": "gpt-4o-mini",
                 "messages": [
                     {"role": "system", "content": "You are an SEO expert tasked with selecting the best keyword for search optimization."},
                     {"role": "user", "content": prompt}
@@ -170,6 +171,7 @@ async def process_data(keywords, search_volumes, cpcs):
     cluster_id = 0
 
     for (sv, cpc), group in grouped:
+        group_cluster_ids = [-1] * len(group)  # Initialize all cluster IDs as -1
         if len(group) > 1:  # Only process groups with more than one keyword
             keywords_group = group['Keywords'].tolist()
             embeddings, valid_keywords = await generate_embeddings(keywords_group)
@@ -178,13 +180,15 @@ async def process_data(keywords, search_volumes, cpcs):
                 similarity_matrix = cosine_similarity(np.array(embeddings))
                 group_clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=0.2, criterion='distance')
                 
-                for gc in group_clusters:
-                    clusters.append(cluster_id + gc)
-                cluster_id = max(clusters)
-            else:
-                clusters.extend([-1] * len(group))  # Assign -1 if no embeddings could be generated
-        else:
-            clusters.extend([-1])  # Assign -1 to indicate no clustering
+                group_cluster_ids = [cluster_id + gc for gc in group_clusters]
+                cluster_id = max(group_cluster_ids)  # Update cluster ID for the next group
+
+        clusters.extend(group_cluster_ids)
+
+    # Ensure clusters list matches the DataFrame length
+    if len(clusters) != len(df):
+        st.error("Error: Length of clusters does not match the DataFrame length.")
+        return
 
     df['Cluster ID'] = clusters
 
