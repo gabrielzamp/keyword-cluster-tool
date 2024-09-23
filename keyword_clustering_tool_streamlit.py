@@ -70,17 +70,6 @@ if uploaded_file is not None:
 
 api_key = st.text_input("Enter your OpenAI API key", type="password")
 
-# Global progress bar
-progress_bar = None
-
-def init_progress():
-    global progress_bar
-    progress_bar = st.progress(0)
-
-def update_progress(current, total):
-    global progress_bar
-    progress_bar.progress(current / total)
-
 async def fetch_embedding(session, text, model="text-embedding-ada-002", max_retries=3):
     retries = 0
     while retries < max_retries:
@@ -108,10 +97,9 @@ async def generate_embeddings(keywords):
     async with aiohttp.ClientSession() as session:
         tasks = [fetch_embedding(session, keyword) for keyword in keywords]
         results = []
-        for i, task in enumerate(asyncio.as_completed(tasks), start=1):
+        for task in asyncio.as_completed(tasks):
             result = await task
             results.append(result)
-            update_progress(i, total_keywords)
 
     embeddings = [res for res in results if res is not None]
     valid_keywords = [kw for kw, res in zip(keywords, results) if res is not None]
@@ -119,14 +107,39 @@ async def generate_embeddings(keywords):
     return embeddings, valid_keywords
 
 async def choose_best_keyword(session, keyword1, keyword2):
-    # ... [Keep this function unchanged] ...
+    prompt = f"Identify which keyword users are more likely to search on Google for SEO: '{keyword1}' or '{keyword2}'. Only include the keyword in the response. If both keywords are similar, select the first one."
+    try:
+        response = await session.post(
+            "https://api.openai.com/v1/chat/completions",
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "model": "gpt-4o-mini",
+                "messages": [
+                    {"role": "system", "content": "You are an SEO expert tasked with selecting the best keyword for search optimization."},
+                    {"role": "user", "content": prompt}
+                ],
+                "max_tokens": 20
+            }
+        )
+        result = await response.json()
+        best_keyword = result['choices'][0]['message']['content'].strip()
+        if keyword1.lower() in best_keyword.lower():
+            return keyword1
+        elif keyword2.lower() in best_keyword.lower():
+            return keyword2
+        else:
+            st.warning(f"Unexpected response from GPT-4: {best_keyword}")
+            return keyword1
+    except Exception as e:
+        st.error(f"Error choosing best keyword: {e}")
+        return keyword1
 
 async def identify_primary_variants(session, cluster_data):
     primary_variant_df = pd.DataFrame(columns=['Cluster ID', 'Keywords', 'Is Primary', 'Primary Keyword', 'GPT-4 Reason'])
     new_rows = []
     total_clusters = cluster_data['Cluster ID'].nunique()
 
-    for i, (cluster_id, group) in enumerate(cluster_data.groupby('Cluster ID'), start=1):
+    for cluster_id, group in cluster_data.groupby('Cluster ID'):
         keywords = group['Keywords'].tolist()
         primary = None
 
@@ -152,19 +165,20 @@ async def identify_primary_variants(session, cluster_data):
                 'GPT-4 Reason': primary
             }
             new_rows.append(new_row)
-        update_progress(i, total_clusters)
 
     return pd.DataFrame(new_rows)
 
 async def process_data(keywords, search_volumes, cpcs):
-    init_progress()
+    progress_bar = st.progress(0)  # Single progress bar for the entire process
     
     st.write("Generating embeddings for the keywords...")
     embeddings, valid_keywords = await generate_embeddings(keywords)
+    progress_bar.progress(0.25)  # 25% progress
 
     if embeddings:
         st.write("Calculating similarity matrix...")
         similarity_matrix = cosine_similarity(embeddings)
+        progress_bar.progress(0.5)  # 50% progress
 
         st.write("Clustering keywords...")
         try:
@@ -174,6 +188,7 @@ async def process_data(keywords, search_volumes, cpcs):
                 return
             filtered_data = data[data['Keywords'].isin(valid_keywords)].copy()
             filtered_data['Cluster ID'] = clusters
+            progress_bar.progress(0.75)  # 75% progress
 
             st.write("Identifying primary keywords within clusters...")
             async with aiohttp.ClientSession() as session:
@@ -190,6 +205,7 @@ async def process_data(keywords, search_volumes, cpcs):
                 mime='text/csv',
                 key='download-csv'
             )
+            progress_bar.progress(1.0)  # 100% progress
         except ValueError as e:
             st.error(f"Error during clustering: {e}. Ensure that embeddings are properly generated.")
     else:
