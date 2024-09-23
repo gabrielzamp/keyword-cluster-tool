@@ -190,7 +190,7 @@ async def process_data(keywords, search_volumes, cpcs):
     df_clustered = df[df['Cluster ID'] != -1].copy()
 
     # Extract unique keywords that were not clustered
-    unique_keywords = df[df['Cluster ID'] == -1]['Keywords'].tolist()
+    unique_keywords_df = df[df['Cluster ID'] == -1][['Keywords', 'Search Volume', 'CPC']]
 
     progress_bar.progress(0.5)
 
@@ -203,15 +203,23 @@ async def process_data(keywords, search_volumes, cpcs):
         st.dataframe(combined_data)
 
         st.download_button(
-            label='Download Analysis Results',
+            label='Download Clustered Analysis Results',
             data=combined_data.to_csv(index=False).encode('utf-8'),
-            file_name='analysis_results.csv',
+            file_name='clustered_analysis_results.csv',
             mime='text/csv'
         )
 
         # Display unique keywords that were not clustered
         st.write("### Unique Keywords (Not Clustered)")
-        st.write(unique_keywords)
+        st.dataframe(unique_keywords_df)
+
+        # Download button for unique keywords
+        st.download_button(
+            label='Download Unique Keywords',
+            data=unique_keywords_df.to_csv(index=False).encode('utf-8'),
+            file_name='unique_keywords.csv',
+            mime='text/csv'
+        )
 
         progress_bar.progress(1.0)
     else:
