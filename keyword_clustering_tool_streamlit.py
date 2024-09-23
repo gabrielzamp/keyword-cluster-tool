@@ -1,3 +1,12 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import asyncio
+import aiohttp
+from sklearn.metrics.pairwise import cosine_similarity
+from scipy.cluster.hierarchy import linkage, fcluster
+import io
+
 # Streamlit page setup
 st.title('Keyword Research Cluster Analysis Tool')
 st.subheader('Leverage OpenAI to cluster similar keywords into groups from your keyword list.')
@@ -80,13 +89,21 @@ async def fetch_embedding(session, text, model="text-embedding-ada-002"):
         st.error(f"Error fetching embedding for '{text}': {e}")
         return None
 
-# Function to generate embeddings asynchronously
+# Function to generate embeddings asynchronously with progress tracking
 async def generate_embeddings(keywords):
     embeddings = []
+    progress_bar = st.progress(0)
+    total_keywords = len(keywords)
+
     async with aiohttp.ClientSession() as session:
         tasks = [fetch_embedding(session, keyword) for keyword in keywords]
-        results = await asyncio.gather(*tasks)
-        embeddings = [res for res in results if res is not None]
+        for i, task in enumerate(asyncio.as_completed(tasks), start=1):
+            result = await task
+            if result is not None:
+                embeddings.append(result)
+            progress_bar.progress(i / total_keywords)
+            st.write(f"Processed {i}/{total_keywords} keywords for embeddings")
+
     return embeddings
 
 # Function to choose the best keyword between two options using GPT-4
@@ -118,12 +135,14 @@ async def choose_best_keyword(session, keyword1, keyword2):
         st.error(f"Error choosing best keyword: {e}")
         return keyword1  # Fallback to the first keyword
 
-# Function to identify primary variants
+# Function to identify primary variants with progress tracking
 async def identify_primary_variants(session, cluster_data):
     primary_variant_df = pd.DataFrame(columns=['Cluster ID', 'Keywords', 'Is Primary', 'Primary Keyword', 'GPT-4 Reason'])
     new_rows = []
-    
-    for cluster_id, group in cluster_data.groupby('Cluster ID'):
+    total_clusters = cluster_data['Cluster ID'].nunique()
+    progress_bar = st.progress(0)
+
+    for i, (cluster_id, group) in enumerate(cluster_data.groupby('Cluster ID'), start=1):
         keywords = group['Keywords'].tolist()
         primary = None  # Initialize primary keyword
 
@@ -146,6 +165,8 @@ async def identify_primary_variants(session, cluster_data):
                 'GPT-4 Reason': primary  # Reason can be expanded if necessary
             }
             new_rows.append(new_row)
+        progress_bar.progress(i / total_clusters)
+        st.write(f"Processed {i}/{total_clusters} clusters")
 
     return pd.DataFrame(new_rows)
 
