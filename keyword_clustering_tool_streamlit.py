@@ -65,8 +65,6 @@ if uploaded_file is not None:
     required_columns = {'Keywords', 'Search Volume', 'CPC'}
     if not required_columns.issubset(data.columns):
         st.error("CSV file must include the following columns: Keywords, Search Volume, CPC")
-    else:
-        st.write(f'Loaded {len(data)} rows from the spreadsheet.')
 
 api_key = st.text_input("Enter your OpenAI API key", type="password")
 
@@ -83,11 +81,10 @@ async def fetch_embedding(session, text, model="text-embedding-ada-002", max_ret
                 result = await response.json()
                 return result['data'][0]['embedding']
         except asyncio.TimeoutError:
-            st.warning(f"Timeout occurred for keyword: {text}. Retrying... ({retries + 1}/{max_retries})")
-        except Exception as e:
-            st.error(f"Error fetching embedding for '{text}': {e}. Retrying... ({retries + 1}/{max_retries})")
+            pass
+        except Exception:
+            pass
         retries += 1
-    st.error(f"Failed to fetch embedding for '{text}' after {max_retries} attempts.")
     return None
 
 async def generate_embeddings(keywords):
@@ -123,10 +120,8 @@ async def choose_best_keyword(session, keyword1, keyword2):
         elif keyword2.lower() in best_keyword.lower():
             return keyword2
         else:
-            st.warning(f"Unexpected response from GPT-4: {best_keyword}")
             return keyword1
-    except Exception as e:
-        st.error(f"Error choosing best keyword: {e}")
+    except Exception:
         return keyword1
 
 async def identify_primary_variants(session, cluster_data):
@@ -164,16 +159,13 @@ async def identify_primary_variants(session, cluster_data):
 async def process_data(keywords, search_volumes, cpcs):
     progress_bar = st.progress(0)
     
-    st.write("Generating embeddings for the keywords...")
     embeddings, valid_keywords = await generate_embeddings(keywords)
     progress_bar.progress(0.25)
 
     if embeddings:
-        st.write("Calculating similarity matrix...")
         similarity_matrix = cosine_similarity(embeddings)
         progress_bar.progress(0.5)
 
-        st.write("Clustering keywords...")
         try:
             clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=0.2, criterion='distance')
             if len(clusters) != len(valid_keywords):
@@ -183,12 +175,10 @@ async def process_data(keywords, search_volumes, cpcs):
             filtered_data['Cluster ID'] = clusters
             progress_bar.progress(0.75)
 
-            st.write("Identifying primary keywords within clusters...")
             async with aiohttp.ClientSession() as session:
                 primary_variant_df = await identify_primary_variants(session, filtered_data[['Cluster ID', 'Keywords']])
                 combined_data = pd.merge(filtered_data, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
 
-            st.write("Analysis complete. Review the clusters below:")
             st.dataframe(combined_data)
 
             st.download_button(
