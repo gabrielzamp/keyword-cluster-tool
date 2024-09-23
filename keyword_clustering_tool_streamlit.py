@@ -74,14 +74,14 @@ async def fetch_embedding(session, text, model="text-embedding-ada-002", max_ret
     retries = 0
     while retries < max_retries:
         try:
-            response = await session.post(
+            async with session.post(
                 "https://api.openai.com/v1/embeddings",
                 headers={"Authorization": f"Bearer {api_key}"},
                 json={"input": text, "model": model},
                 timeout=10
-            )
-            result = await response.json()
-            return result['data'][0]['embedding']
+            ) as response:
+                result = await response.json()
+                return result['data'][0]['embedding']
         except asyncio.TimeoutError:
             st.warning(f"Timeout occurred for keyword: {text}. Retrying... ({retries + 1}/{max_retries})")
         except Exception as e:
@@ -93,18 +93,25 @@ async def fetch_embedding(session, text, model="text-embedding-ada-002", max_ret
 async def generate_embeddings(keywords):
     embeddings = []
     progress_bar = st.progress(0)
-    total_keywords = len(keywords)
     progress_text = st.empty()
+    total_keywords = len(keywords)
 
     async with aiohttp.ClientSession() as session:
         tasks = [fetch_embedding(session, keyword) for keyword in keywords]
         results = []
         for i, task in enumerate(asyncio.as_completed(tasks), start=1):
-            result = await task
-            results.append(result)
+            try:
+                result = await asyncio.wait_for(task, timeout=30)  # 30-second timeout
+                results.append(result)
+            except asyncio.TimeoutError:
+                st.warning(f"Timeout occurred for keyword {i}. Skipping...")
+                results.append(None)
+            except Exception as e:
+                st.error(f"Error processing keyword {i}: {str(e)}")
+                results.append(None)
+            
             progress_bar.progress(i / total_keywords)
-            progress_text.empty()  # Clear previous text
-            progress_text.write(f"Processed {i}/{total_keywords} keywords for embeddings", unsafe_allow_html=True)
+            progress_text.text(f"Processed {i}/{total_keywords} keywords")
 
     embeddings = [res for res in results if res is not None]
     valid_keywords = [kw for kw, res in zip(keywords, results) if res is not None]
