@@ -216,8 +216,9 @@ with suppress_stdout():
     
                 # Ensure clusters list has the same length as df
                 if len(clusters) != len(df):
-                    st.error(f"Mismatch in cluster assignments. Clusters: {len(clusters)}, DataFrame rows: {len(df)}")
-                    return
+                    st.warning(f"Mismatch in cluster assignments. Clusters: {len(clusters)}, DataFrame rows: {len(df)}")
+                    # Pad the clusters list with -1 for any unassigned keywords
+                    clusters.extend([-1] * (len(df) - len(clusters)))
     
                 df['Cluster ID'] = clusters
     
