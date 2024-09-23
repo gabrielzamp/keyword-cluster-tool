@@ -7,6 +7,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from scipy.cluster.hierarchy import linkage, fcluster
 import io
 from openai import OpenAI
+
 # Streamlit page setup
 st.title('Keyword Research Cluster Analysis Tool')
 st.subheader('Leverage OpenAI to cluster similar keywords into groups from your keyword list.')
@@ -75,25 +76,33 @@ if uploaded_file is not None:
 # API Key input
 api_key = st.text_input("Enter your OpenAI API key", type="password")
 
-# Asynchronous function to get embeddings in parallel
-async def fetch_embedding(session, text, model="text-embedding-ada-002"):
-    try:
-        response = await session.post(
-            "https://api.openai.com/v1/embeddings",
-            headers={"Authorization": f"Bearer {api_key}"},
-            json={"input": text, "model": model}
-        )
-        result = await response.json()
-        return result['data'][0]['embedding']
-    except Exception as e:
-        st.error(f"Error fetching embedding for '{text}': {e}")
-        return None
+# Asynchronous function to get embeddings in parallel with timeout and retry logic
+async def fetch_embedding(session, text, model="text-embedding-ada-002", max_retries=3):
+    retries = 0
+    while retries < max_retries:
+        try:
+            response = await session.post(
+                "https://api.openai.com/v1/embeddings",
+                headers={"Authorization": f"Bearer {api_key}"},
+                json={"input": text, "model": model},
+                timeout=10  # Set a timeout for the request
+            )
+            result = await response.json()
+            return result['data'][0]['embedding']
+        except asyncio.TimeoutError:
+            st.warning(f"Timeout occurred for keyword: {text}. Retrying... ({retries + 1}/{max_retries})")
+        except Exception as e:
+            st.error(f"Error fetching embedding for '{text}': {e}. Retrying... ({retries + 1}/{max_retries})")
+        retries += 1
+    st.error(f"Failed to fetch embedding for '{text}' after {max_retries} attempts.")
+    return None
 
 # Function to generate embeddings asynchronously with progress tracking and validation
 async def generate_embeddings(keywords):
     embeddings = []
     progress_bar = st.progress(0)
     total_keywords = len(keywords)
+    progress_text = st.empty()  # Create a placeholder for progress updates
 
     async with aiohttp.ClientSession() as session:
         tasks = [fetch_embedding(session, keyword) for keyword in keywords]
@@ -102,7 +111,7 @@ async def generate_embeddings(keywords):
             result = await task
             results.append(result)
             progress_bar.progress(i / total_keywords)
-            st.write(f"Processed {i}/{total_keywords} keywords for embeddings")
+            progress_text.text(f"Processed {i}/{total_keywords} keywords for embeddings")  # Update on the same line
 
     # Filter out None values and validate lengths
     embeddings = [res for res in results if res is not None]
@@ -174,7 +183,7 @@ async def identify_primary_variants(session, cluster_data):
             }
             new_rows.append(new_row)
         progress_bar.progress(i / total_clusters)
-        st.write(f"Processed {i}/{total_clusters} clusters")
+        progress_text.text(f"Processed {i}/{total_clusters} clusters")
 
     return pd.DataFrame(new_rows)
 
@@ -209,10 +218,10 @@ async def process_data(keywords, search_volumes, cpcs):
 
             # Download link
             st.download_button(
-                'Download Analysis Results',
-                combined_data.to_csv(index=False).encode('utf-8'),
-                'analysis_results.csv',
-                'text/csv',
+                label='Download Analysis Results',
+                data=combined_data.to_csv(index=False).encode('utf-8'),
+                file_name='analysis_results.csv',
+                mime='text/csv',
                 key='download-csv'
             )
         except ValueError as e:
@@ -232,3 +241,5 @@ elif uploaded_file is not None and not api_key:
     st.warning("Please enter your OpenAI API key to proceed.")
 else:
     st.info("Please upload a CSV file and enter your OpenAI API key to start the analysis.")
+
+
