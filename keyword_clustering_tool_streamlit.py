@@ -6,6 +6,7 @@ import aiohttp
 from sklearn.metrics.pairwise import cosine_similarity
 from scipy.cluster.hierarchy import linkage, fcluster
 import io
+from openai import OpenAI
 
 # Streamlit page setup
 st.title('Keyword Research Cluster Analysis Tool')
