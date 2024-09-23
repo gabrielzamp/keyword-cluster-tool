@@ -174,71 +174,71 @@ with suppress_stdout():
         return pd.DataFrame(new_rows)
 
     async def process_data(keywords, search_volumes, cpcs):
-    progress_bar = st.progress(0)
+        progress_bar = st.progress(0)
+        
+        with suppress_stdout():
+            st.write("Generating embeddings for the keywords...")
+            embeddings, valid_keywords = await generate_embeddings(keywords)
+            progress_bar.progress(0.25)
     
-    with suppress_stdout():
-        st.write("Generating embeddings for the keywords...")
-        embeddings, valid_keywords = await generate_embeddings(keywords)
-        progress_bar.progress(0.25)
-
-        if embeddings:
-            st.write("Clustering keywords...")
-            
-            # Create a DataFrame with all the data
-            df = pd.DataFrame({
-                'Keywords': valid_keywords,
-                'Search Volume': [search_volumes[keywords.index(kw)] for kw in valid_keywords],
-                'CPC': [cpcs[keywords.index(kw)] for kw in valid_keywords]
-            })
-            df['Embedding'] = embeddings
-
-            # Group by Search Volume and CPC
-            grouped = df.groupby(['Search Volume', 'CPC'])
-
-            clusters = []
-            cluster_id = 0
-
-            for (sv, cpc), group in grouped:
-                if len(group) > 1:  # Only process groups with more than one keyword
-                    group_embeddings = np.array(group['Embedding'].tolist())
-                    similarity_matrix = cosine_similarity(group_embeddings)
-                    
-                    # Cluster within this SV and CPC group
-                    group_clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=0.2, criterion='distance')
-                    
-                    # Assign cluster IDs
-                    for gc in group_clusters:
-                        clusters.append(cluster_id + gc)
-                    cluster_id = max(clusters)
-                else:
-                    # Assign -1 to indicate this keyword is not in any cluster
-                    clusters.extend([-1] * len(group))
-
-            df['Cluster ID'] = clusters
-
-            # Filter out keywords not in any cluster
-            df_clustered = df[df['Cluster ID'] != -1].copy()
-
-            progress_bar.progress(0.75)
-
-            st.write("Identifying primary keywords within clusters...")
-            async with aiohttp.ClientSession() as session:
-                primary_variant_df = await identify_primary_variants(session, df_clustered[['Cluster ID', 'Keywords']])
-                combined_data = pd.merge(df_clustered, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
-
-            st.write("Analysis complete. Review the clusters below:")
-            st.dataframe(combined_data)
-
-            st.download_button(
-                label='Download Analysis Results',
-                data=combined_data.to_csv(index=False).encode('utf-8'),
-                file_name='analysis_results.csv',
-                mime='text/csv',
-                key='download-csv'
-            )
-            progress_bar.progress(1.0)
-        else:
-            st.error("Failed to generate embeddings for all keywords.")
+            if embeddings:
+                st.write("Clustering keywords...")
+                
+                # Create a DataFrame with all the data
+                df = pd.DataFrame({
+                    'Keywords': valid_keywords,
+                    'Search Volume': [search_volumes[keywords.index(kw)] for kw in valid_keywords],
+                    'CPC': [cpcs[keywords.index(kw)] for kw in valid_keywords]
+                })
+                df['Embedding'] = embeddings
+    
+                # Group by Search Volume and CPC
+                grouped = df.groupby(['Search Volume', 'CPC'])
+    
+                clusters = []
+                cluster_id = 0
+    
+                for (sv, cpc), group in grouped:
+                    if len(group) > 1:  # Only process groups with more than one keyword
+                        group_embeddings = np.array(group['Embedding'].tolist())
+                        similarity_matrix = cosine_similarity(group_embeddings)
+                        
+                        # Cluster within this SV and CPC group
+                        group_clusters = fcluster(linkage(1 - similarity_matrix, method='average'), t=0.2, criterion='distance')
+                        
+                        # Assign cluster IDs
+                        for gc in group_clusters:
+                            clusters.append(cluster_id + gc)
+                        cluster_id = max(clusters)
+                    else:
+                        # Assign -1 to indicate this keyword is not in any cluster
+                        clusters.extend([-1] * len(group))
+    
+                df['Cluster ID'] = clusters
+    
+                # Filter out keywords not in any cluster
+                df_clustered = df[df['Cluster ID'] != -1].copy()
+    
+                progress_bar.progress(0.75)
+    
+                st.write("Identifying primary keywords within clusters...")
+                async with aiohttp.ClientSession() as session:
+                    primary_variant_df = await identify_primary_variants(session, df_clustered[['Cluster ID', 'Keywords']])
+                    combined_data = pd.merge(df_clustered, primary_variant_df, on=['Cluster ID', 'Keywords'], how='left')
+    
+                st.write("Analysis complete. Review the clusters below:")
+                st.dataframe(combined_data)
+    
+                st.download_button(
+                    label='Download Analysis Results',
+                    data=combined_data.to_csv(index=False).encode('utf-8'),
+                    file_name='analysis_results.csv',
+                    mime='text/csv',
+                    key='download-csv'
+                )
+                progress_bar.progress(1.0)
+            else:
+                st.error("Failed to generate embeddings for all keywords.")
 
     if uploaded_file is not None and api_key:
         keywords = data['Keywords'].tolist()
