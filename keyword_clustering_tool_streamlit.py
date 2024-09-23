@@ -92,14 +92,9 @@ async def fetch_embedding(session, text, model="text-embedding-ada-002", max_ret
 
 async def generate_embeddings(keywords):
     embeddings = []
-    total_keywords = len(keywords)
-    
     async with aiohttp.ClientSession() as session:
         tasks = [fetch_embedding(session, keyword) for keyword in keywords]
-        results = []
-        for task in asyncio.as_completed(tasks):
-            result = await task
-            results.append(result)
+        results = await asyncio.gather(*tasks)
 
     embeddings = [res for res in results if res is not None]
     valid_keywords = [kw for kw, res in zip(keywords, results) if res is not None]
@@ -137,7 +132,6 @@ async def choose_best_keyword(session, keyword1, keyword2):
 async def identify_primary_variants(session, cluster_data):
     primary_variant_df = pd.DataFrame(columns=['Cluster ID', 'Keywords', 'Is Primary', 'Primary Keyword', 'GPT-4 Reason'])
     new_rows = []
-    total_clusters = cluster_data['Cluster ID'].nunique()
 
     for cluster_id, group in cluster_data.groupby('Cluster ID'):
         keywords = group['Keywords'].tolist()
@@ -148,7 +142,6 @@ async def identify_primary_variants(session, cluster_data):
         else:
             embeddings, valid_keywords = await generate_embeddings(keywords)
             if not embeddings:
-                st.error(f"Failed to generate embeddings for cluster {cluster_id}. Skipping...")
                 continue
             similarity_matrix = cosine_similarity(np.array(embeddings))
             avg_similarity = np.mean(similarity_matrix, axis=1)
@@ -169,16 +162,16 @@ async def identify_primary_variants(session, cluster_data):
     return pd.DataFrame(new_rows)
 
 async def process_data(keywords, search_volumes, cpcs):
-    progress_bar = st.progress(0)  # Single progress bar for the entire process
+    progress_bar = st.progress(0)
     
     st.write("Generating embeddings for the keywords...")
     embeddings, valid_keywords = await generate_embeddings(keywords)
-    progress_bar.progress(0.25)  # 25% progress
+    progress_bar.progress(0.25)
 
     if embeddings:
         st.write("Calculating similarity matrix...")
         similarity_matrix = cosine_similarity(embeddings)
-        progress_bar.progress(0.5)  # 50% progress
+        progress_bar.progress(0.5)
 
         st.write("Clustering keywords...")
         try:
@@ -188,7 +181,7 @@ async def process_data(keywords, search_volumes, cpcs):
                 return
             filtered_data = data[data['Keywords'].isin(valid_keywords)].copy()
             filtered_data['Cluster ID'] = clusters
-            progress_bar.progress(0.75)  # 75% progress
+            progress_bar.progress(0.75)
 
             st.write("Identifying primary keywords within clusters...")
             async with aiohttp.ClientSession() as session:
@@ -205,7 +198,7 @@ async def process_data(keywords, search_volumes, cpcs):
                 mime='text/csv',
                 key='download-csv'
             )
-            progress_bar.progress(1.0)  # 100% progress
+            progress_bar.progress(1.0)
         except ValueError as e:
             st.error(f"Error during clustering: {e}. Ensure that embeddings are properly generated.")
     else:
